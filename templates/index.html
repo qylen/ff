@@ -606,7 +606,7 @@ canvas{max-height:240px}
         <div class="search-box"><span>🔍</span><input type="text" placeholder="Search income…" id="inc-search" oninput="filterIncome()"></div>
         <select class="filter-select" id="inc-cat-filter" onchange="filterIncome()"><option value="">All Categories</option></select>
         <div style="margin-left:auto;display:flex;gap:8px">
-          <button class="btn btn-ghost" onclick="window.location.href='/api/income/export'">⬇ Export CSV</button>
+          <button class="btn btn-ghost" onclick="downloadExport('/api/income/export','income.csv')">⬇ Export CSV</button>
           <button class="btn btn-teal" onclick="openIncomeModal()">+ Add Income</button>
         </div>
       </div>
@@ -617,6 +617,10 @@ canvas{max-height:240px}
             <tbody id="income-body"></tbody>
           </table>
         </div>
+        <div style="padding:10px 16px;display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn btn-ghost btn-sm" id="inc-prev" onclick="changeIncomePage(-1)">← Prev</button>
+          <button class="btn btn-ghost btn-sm" id="inc-next" onclick="changeIncomePage(1)">Next →</button>
+        </div>
       </div>
     </div>
 
@@ -626,7 +630,7 @@ canvas{max-height:240px}
         <div class="search-box"><span>🔍</span><input type="text" placeholder="Search expenses…" id="exp-search" oninput="filterExpenses()"></div>
         <select class="filter-select" id="exp-cat-filter" onchange="filterExpenses()"><option value="">All Categories</option></select>
         <div style="margin-left:auto;display:flex;gap:8px">
-          <button class="btn btn-ghost" onclick="window.location.href='/api/expenses/export'">⬇ Export CSV</button>
+          <button class="btn btn-ghost" onclick="downloadExport('/api/expenses/export','expenses.csv')">⬇ Export CSV</button>
           <button class="btn btn-primary" onclick="openExpenseModal()">+ Add Expense</button>
         </div>
       </div>
@@ -636,6 +640,10 @@ canvas{max-height:240px}
             <thead><tr><th>Title</th><th>Category</th><th>Store / Vendor</th><th>Member</th><th>Date</th><th>Amount</th><th style="width:90px">Actions</th></tr></thead>
             <tbody id="expenses-body"></tbody>
           </table>
+        </div>
+        <div style="padding:10px 16px;display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn btn-ghost btn-sm" id="exp-prev" onclick="changeExpensePage(-1)">← Prev</button>
+          <button class="btn btn-ghost btn-sm" id="exp-next" onclick="changeExpensePage(1)">Next →</button>
         </div>
       </div>
     </div>
@@ -649,7 +657,7 @@ canvas{max-height:240px}
           <option>Pending</option><option>Paid</option><option>Overdue</option><option>Void</option>
         </select>
         <div style="margin-left:auto;display:flex;gap:8px">
-          <button class="btn btn-ghost" onclick="window.location.href='/api/bills/export'">⬇ Export CSV</button>
+          <button class="btn btn-ghost" onclick="downloadExport('/api/bills/export','bills.csv')">⬇ Export CSV</button>
           <button class="btn btn-amber" onclick="openBillModal()">+ Add Bill</button>
         </div>
       </div>
@@ -794,10 +802,10 @@ canvas{max-height:240px}
     <div class="modal-body">
       <input type="hidden" id="income-id">
       <div class="form-grid">
-        <div class="form-group form-full"><label class="form-label">Title *</label><input class="form-input" id="inc-title" placeholder="e.g. Monthly Salary, Freelance Project"></div>
+        <div class="form-group form-full"><label class="form-label">Title *</label><input class="form-input" id="inc-title" required placeholder="e.g. Monthly Salary, Freelance Project"></div>
         <div class="form-group"><label class="form-label">Category</label><select class="form-select" id="inc-category"></select></div>
-        <div class="form-group"><label class="form-label">Amount *</label><input class="form-input" id="inc-amount" type="number" step="0.01" min="0" placeholder="0.00"></div>
-        <div class="form-group"><label class="form-label">Date *</label><input class="form-input" id="inc-date" type="date"></div>
+        <div class="form-group"><label class="form-label">Amount *</label><input class="form-input" id="inc-amount" type="number" required step="0.01" min="0" placeholder="0.00"></div>
+        <div class="form-group"><label class="form-label">Date *</label><input class="form-input" id="inc-date" type="date" required></div>
         <div class="form-group"><label class="form-label">Source / Employer</label><input class="form-input" id="inc-source" placeholder="e.g. ACME Corp, Upwork"></div>
         <div class="form-group"><label class="form-label">Family Member</label><input class="form-input" id="inc-member" placeholder="e.g. Mum, Dad"></div>
         <div class="form-group form-full"><label class="form-label">Notes</label><textarea class="form-textarea" id="inc-notes" rows="2" placeholder="Any additional notes…"></textarea></div>
@@ -820,10 +828,10 @@ canvas{max-height:240px}
     <div class="modal-body">
       <input type="hidden" id="exp-id">
       <div class="form-grid">
-        <div class="form-group form-full"><label class="form-label">Title *</label><input class="form-input" id="e-title" placeholder="e.g. Weekly groceries, Gym membership"></div>
+        <div class="form-group form-full"><label class="form-label">Title *</label><input class="form-input" id="e-title" required placeholder="e.g. Weekly groceries, Gym membership"></div>
         <div class="form-group"><label class="form-label">Category</label><select class="form-select" id="e-category"></select></div>
-        <div class="form-group"><label class="form-label">Amount *</label><input class="form-input" id="e-amount" type="number" step="0.01" min="0" placeholder="0.00"></div>
-        <div class="form-group"><label class="form-label">Date *</label><input class="form-input" id="e-date" type="date"></div>
+        <div class="form-group"><label class="form-label">Amount *</label><input class="form-input" id="e-amount" type="number" required step="0.01" min="0" placeholder="0.00"></div>
+        <div class="form-group"><label class="form-label">Date *</label><input class="form-input" id="e-date" type="date" required></div>
         <div class="form-group"><label class="form-label">Store / Vendor</label><input class="form-input" id="e-store" placeholder="e.g. Walmart, Amazon"></div>
         <div class="form-group"><label class="form-label">Family Member</label><input class="form-input" id="e-member" placeholder="e.g. Mum, Dad, Shared"></div>
         <div class="form-group"><label class="form-label">Receipt Ref</label><input class="form-input" id="e-ref" placeholder="Receipt / reference #"></div>
@@ -850,15 +858,15 @@ canvas{max-height:240px}
         <div class="form-group"><label class="form-label">Payee *</label>
           <select class="form-select" id="bill-payee" onchange="fillPayeeDetails()"><option value="">— Select or enter below —</option></select>
         </div>
-        <div class="form-group"><label class="form-label">Payee Name *</label><input class="form-input" id="bill-payee-name" placeholder="e.g. Electric Company"></div>
+        <div class="form-group"><label class="form-label">Payee Name *</label><input class="form-input" id="bill-payee-name" required placeholder="e.g. Electric Company"></div>
         <div class="form-group"><label class="form-label">Category</label><select class="form-select" id="bill-category"></select></div>
         <div class="form-group"><label class="form-label">Status</label>
           <select class="form-select" id="bill-status">
             <option>Pending</option><option>Paid</option><option>Void</option>
           </select>
         </div>
-        <div class="form-group"><label class="form-label">Bill Date *</label><input class="form-input" id="bill-date" type="date"></div>
-        <div class="form-group"><label class="form-label">Due Date *</label><input class="form-input" id="bill-due" type="date"></div>
+        <div class="form-group"><label class="form-label">Bill Date *</label><input class="form-input" id="bill-date" type="date" required></div>
+        <div class="form-group"><label class="form-label">Due Date *</label><input class="form-input" id="bill-due" type="date" required></div>
         <div class="form-group"><label class="form-label">Discount %</label><input class="form-input" id="bill-discount" type="number" step="0.01" min="0" max="100" value="0" oninput="recalcBillTotals()"></div>
         <div class="form-group"><label class="form-label">Tax / Fees %</label><input class="form-input" id="bill-tax" type="number" step="0.01" min="0" value="0" oninput="recalcBillTotals()"></div>
       </div>
@@ -897,7 +905,7 @@ canvas{max-height:240px}
     <div class="modal-body">
       <input type="hidden" id="payee-id">
       <div class="form-grid">
-        <div class="form-group"><label class="form-label">Name *</label><input class="form-input" id="p-name" placeholder="e.g. Electric Company"></div>
+        <div class="form-group"><label class="form-label">Name *</label><input class="form-input" id="p-name" required placeholder="e.g. Electric Company"></div>
         <div class="form-group"><label class="form-label">Category</label><input class="form-input" id="p-category" placeholder="e.g. Utility, Subscription"></div>
         <div class="form-group"><label class="form-label">Email</label><input class="form-input" id="p-email" type="email" placeholder="billing@company.com"></div>
         <div class="form-group"><label class="form-label">Phone</label><input class="form-input" id="p-phone" placeholder="+1 000 000 0000"></div>
@@ -945,6 +953,8 @@ canvas{max-height:240px}
 const state = {
   settings: {},
   payees: [],
+  auth: { username: "", password: "" },
+  paging: { incomeOffset: 0, expenseOffset: 0, limit: 25, incomeTotal: 0, expenseTotal: 0 },
   dashChart: null,
   dashPieChart: null,
   reportBarChart: null,
@@ -998,7 +1008,7 @@ const CAT_COLORS = {
 
 function catChip(cat) {
   const c = CAT_COLORS[cat] || CAT_COLORS["Other"];
-  return `<span class="cat-chip" style="background:${c.bg};color:${c.text}">${c.emoji} ${cat}</span>`;
+  return `<span class="cat-chip" style="background:${c.bg};color:${c.text}">${c.emoji} ${escapeHtml(cat)}</span>`;
 }
 
 // ── View meta ──────────────────────────────────────────────────────────────
@@ -1019,6 +1029,17 @@ const VIEW_META = {
 function fmt(amount) {
   const sym = state.settings.currency_symbol || "$";
   return sym + parseFloat(amount || 0).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+function escapeHtml(v) {
+  return String(v ?? "").replace(/[&<>"']/g, ch => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", "\"":"&quot;", "'":"&#39;" }[ch]));
+}
+function getCookie(name) {
+  return document.cookie.split("; ").find(c => c.startsWith(name + "="))?.split("=")[1] || "";
+}
+function ensureAuth() {
+  if (state.auth.username && state.auth.password) return;
+  state.auth.username = prompt("FamilyFinance username:", "admin") || "";
+  state.auth.password = prompt("FamilyFinance password:", "") || "";
 }
 
 function today() { return new Date().toISOString().split("T")[0]; }
@@ -1048,8 +1069,36 @@ function toast(msg, type="success") {
 }
 
 async function api(url, opts={}) {
-  const r = await fetch(url, { headers:{"Content-Type":"application/json"}, ...opts });
-  return r.json();
+  ensureAuth();
+  const headers = { "Content-Type":"application/json", ...(opts.headers || {}) };
+  const csrf = getCookie("csrf_token");
+  if (csrf) headers["X-CSRF-Token"] = decodeURIComponent(csrf);
+  headers["Authorization"] = `Basic ${btoa(`${state.auth.username}:${state.auth.password}`)}`;
+  const r = await fetch(url, { ...opts, headers });
+  let data = {};
+  try { data = await r.json(); } catch { data = {}; }
+  if (!r.ok) {
+    const msg = data.error || `Request failed (${r.status})`;
+    toast(msg, "error");
+    throw new Error(msg);
+  }
+  return data;
+}
+
+async function downloadExport(url, filename) {
+  ensureAuth();
+  const headers = { "Authorization": `Basic ${btoa(`${state.auth.username}:${state.auth.password}`)}` };
+  const r = await fetch(url, { headers });
+  if (!r.ok) {
+    toast(`Export failed (${r.status})`, "error");
+    return;
+  }
+  const blob = await r.blob();
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1177,8 +1226,8 @@ async function loadDashboard() {
         return `<div class="activity-item">
           <div class="activity-icon exp" style="background:${c.bg}">${c.emoji}</div>
           <div class="activity-body">
-            <div class="activity-title">${e.title}</div>
-            <div class="activity-sub">${e.category}${e.store ? " · " + e.store : ""} · ${e.expense_date}</div>
+            <div class="activity-title">${escapeHtml(e.title)}</div>
+            <div class="activity-sub">${escapeHtml(e.category)}${e.store ? " · " + escapeHtml(e.store) : ""} · ${escapeHtml(e.expense_date)}</div>
           </div>
           <div class="activity-amount exp">${fmt(e.amount)}</div>
         </div>`;
@@ -1192,8 +1241,8 @@ async function loadDashboard() {
         return `<div class="activity-item">
           <div class="activity-icon inc" style="background:${c.bg}">${c.emoji}</div>
           <div class="activity-body">
-            <div class="activity-title">${i.title}</div>
-            <div class="activity-sub">${i.category}${i.source ? " · " + i.source : ""} · ${i.income_date}</div>
+            <div class="activity-title">${escapeHtml(i.title)}</div>
+            <div class="activity-sub">${escapeHtml(i.category)}${i.source ? " · " + escapeHtml(i.source) : ""} · ${escapeHtml(i.income_date)}</div>
           </div>
           <div class="activity-amount inc">+${fmt(i.amount)}</div>
         </div>`;
@@ -1212,7 +1261,11 @@ async function loadDashboard() {
 async function loadIncome() {
   const q   = document.getElementById("inc-search").value;
   const cat = document.getElementById("inc-cat-filter").value;
-  const items = await api(`/api/income?q=${encodeURIComponent(q)}&category=${encodeURIComponent(cat)}`);
+  const { items, total, offset, limit } = await api(`/api/income?q=${encodeURIComponent(q)}&category=${encodeURIComponent(cat)}&limit=${state.paging.limit}&offset=${state.paging.incomeOffset}`);
+  state.paging.incomeTotal = total;
+  state.paging.incomeOffset = offset;
+  document.getElementById("inc-prev").disabled = offset <= 0;
+  document.getElementById("inc-next").disabled = offset + limit >= total;
   const tbody = document.getElementById("income-body");
   if (!items.length) {
     tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state"><div class="empty-icon">💰</div><div class="empty-title">No income recorded</div><div class="empty-sub">Log your first income entry to get started</div></div></td></tr>`;
@@ -1222,11 +1275,11 @@ async function loadIncome() {
   tbody.innerHTML = items.map(i => {
     total += parseFloat(i.amount || 0);
     return `<tr>
-      <td style="font-weight:600">${i.title}</td>
+      <td style="font-weight:600">${escapeHtml(i.title)}</td>
       <td>${catChip(i.category)}</td>
-      <td>${i.source || "—"}</td>
-      <td>${i.member || "—"}</td>
-      <td>${i.income_date}</td>
+      <td>${escapeHtml(i.source || "—")}</td>
+      <td>${escapeHtml(i.member || "—")}</td>
+      <td>${escapeHtml(i.income_date)}</td>
       <td style="font-weight:700;color:var(--teal)">+${fmt(i.amount)}</td>
       <td>
         <div style="display:flex;gap:5px">
@@ -1238,7 +1291,11 @@ async function loadIncome() {
   }).join("");
 }
 
-function filterIncome() { loadIncome(); }
+function filterIncome() { state.paging.incomeOffset = 0; loadIncome(); }
+function changeIncomePage(step) {
+  state.paging.incomeOffset = Math.max(0, state.paging.incomeOffset + (step * state.paging.limit));
+  loadIncome();
+}
 
 function openIncomeModal(inc=null) {
   document.getElementById("income-id").value = "";
@@ -1263,9 +1320,8 @@ function openIncomeModal(inc=null) {
 }
 
 async function editIncome(id) {
-  const items = await api(`/api/income`);
-  const inc = items.find(i => i.id === id);
-  if (inc) openIncomeModal(inc);
+  const inc = await api(`/api/income/${id}`);
+  if (inc?.id) openIncomeModal(inc);
 }
 
 async function saveIncome() {
@@ -1301,18 +1357,22 @@ async function deleteIncome(id, title) {
 async function loadExpenses() {
   const q   = document.getElementById("exp-search").value;
   const cat = document.getElementById("exp-cat-filter").value;
-  const exps = await api(`/api/expenses?q=${encodeURIComponent(q)}&category=${encodeURIComponent(cat)}`);
+  const { items: exps, total, offset, limit } = await api(`/api/expenses?q=${encodeURIComponent(q)}&category=${encodeURIComponent(cat)}&limit=${state.paging.limit}&offset=${state.paging.expenseOffset}`);
+  state.paging.expenseTotal = total;
+  state.paging.expenseOffset = offset;
+  document.getElementById("exp-prev").disabled = offset <= 0;
+  document.getElementById("exp-next").disabled = offset + limit >= total;
   const tbody = document.getElementById("expenses-body");
   if (!exps.length) {
     tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state"><div class="empty-icon">🛒</div><div class="empty-title">No expenses found</div><div class="empty-sub">Start tracking your spending</div></div></td></tr>`;
     return;
   }
   tbody.innerHTML = exps.map(e => `<tr>
-    <td style="font-weight:600">${e.title}</td>
+    <td style="font-weight:600">${escapeHtml(e.title)}</td>
     <td>${catChip(e.category)}</td>
-    <td>${e.store || "—"}</td>
-    <td>${e.member || "—"}</td>
-    <td>${e.expense_date}</td>
+    <td>${escapeHtml(e.store || "—")}</td>
+    <td>${escapeHtml(e.member || "—")}</td>
+    <td>${escapeHtml(e.expense_date)}</td>
     <td style="font-weight:700;color:var(--coral)">${fmt(e.amount)}</td>
     <td>
       <div style="display:flex;gap:5px">
@@ -1323,7 +1383,11 @@ async function loadExpenses() {
   </tr>`).join("");
 }
 
-function filterExpenses() { loadExpenses(); }
+function filterExpenses() { state.paging.expenseOffset = 0; loadExpenses(); }
+function changeExpensePage(step) {
+  state.paging.expenseOffset = Math.max(0, state.paging.expenseOffset + (step * state.paging.limit));
+  loadExpenses();
+}
 
 function openExpenseModal(exp=null) {
   document.getElementById("exp-id").value = "";
@@ -1349,9 +1413,8 @@ function openExpenseModal(exp=null) {
 }
 
 async function editExpense(id) {
-  const exps = await api("/api/expenses");
-  const exp = exps.find(e => e.id === id);
-  if (exp) openExpenseModal(exp);
+  const exp = await api(`/api/expenses/${id}`);
+  if (exp?.id) openExpenseModal(exp);
 }
 
 async function saveExpense() {
@@ -1397,11 +1460,11 @@ async function loadBills() {
   tbody.innerHTML = bills.map(b => {
     const st = computeBillStatus(b.status, b.due_date);
     return `<tr>
-      <td style="font-weight:700;color:var(--indigo)">${b.bill_number}</td>
-      <td style="font-weight:600">${b.payee_name}</td>
+      <td style="font-weight:700;color:var(--indigo)">${escapeHtml(b.bill_number)}</td>
+      <td style="font-weight:600">${escapeHtml(b.payee_name)}</td>
       <td>${catChip(b.bill_category || "Other")}</td>
-      <td>${b.bill_date}</td>
-      <td>${b.due_date}</td>
+      <td>${escapeHtml(b.bill_date)}</td>
+      <td>${escapeHtml(b.due_date)}</td>
       <td style="font-weight:700">${fmt(b.total_amount)}</td>
       <td>${billStatusBadge(st)}</td>
       <td>
@@ -1409,7 +1472,7 @@ async function loadBills() {
           <button class="btn btn-ghost btn-sm btn-icon" title="Edit" onclick="editBill(${b.id})">✏️</button>
           <button class="btn btn-ghost btn-sm btn-icon" title="Print" onclick="printBill(${b.id})">🖨️</button>
           <button class="btn btn-ghost btn-sm btn-icon" title="Status" onclick="openBillStatusModal(${b.id},'${b.status}')">🔄</button>
-          <button class="btn btn-ghost btn-sm btn-icon" title="Delete" onclick="deleteBill(${b.id},'${b.bill_number}')">🗑️</button>
+          <button class="btn btn-ghost btn-sm btn-icon" title="Delete" onclick="deleteBill(${b.id},'${escapeHtml(b.bill_number)}')">🗑️</button>
         </div>
       </td>
     </tr>`;
@@ -1459,7 +1522,7 @@ async function openBillModal(id = null) {
   const sel = document.getElementById("bill-payee");
   sel.innerHTML = `<option value="">— Select payee (optional) —</option>`;
   state.payees.forEach(p => {
-    sel.innerHTML += `<option value="${p.id}" data-name="${p.name}" data-email="${p.email||''}" data-address="${p.address||''}">${p.name}${p.category ? " — "+p.category : ""}</option>`;
+    sel.innerHTML += `<option value="${p.id}">${escapeHtml(p.name)}${p.category ? " — "+escapeHtml(p.category) : ""}</option>`;
   });
 
   // Populate bill categories
@@ -1493,9 +1556,10 @@ async function loadBillForEdit(id) {
 
 function fillPayeeDetails() {
   const sel = document.getElementById("bill-payee");
-  const opt = sel.selectedOptions[0];
-  if (!opt || !opt.value) return;
-  document.getElementById("bill-payee-name").value = opt.dataset.name || "";
+  const id = Number(sel.value);
+  if (!id) return;
+  const payee = state.payees.find(p => p.id === id);
+  document.getElementById("bill-payee-name").value = payee?.name || "";
 }
 
 function addBillLineItem(item = {}) {
@@ -1505,8 +1569,8 @@ function addBillLineItem(item = {}) {
   const total = (qty * price).toFixed(2);
   const sym   = state.settings.currency_symbol || "$";
   tr.innerHTML = `
-    <td><input type="text" placeholder="Description" value="${item.item_name||''}" oninput="recalcBillTotals()"></td>
-    <td><input type="text" placeholder="Notes" value="${item.description||''}"></td>
+    <td><input type="text" placeholder="Description" value="${escapeHtml(item.item_name||'')}" oninput="recalcBillTotals()"></td>
+    <td><input type="text" placeholder="Notes" value="${escapeHtml(item.description||'')}"></td>
     <td><input type="number" min="0" step="0.01" value="${qty}" oninput="recalcBillRow(this);recalcBillTotals()"></td>
     <td><input type="number" min="0" step="0.01" value="${price}" oninput="recalcBillRow(this);recalcBillTotals()"></td>
     <td><div class="items-total">${sym}${total}</div></td>
@@ -1593,10 +1657,10 @@ async function loadPayees() {
     return;
   }
   tbody.innerHTML = payees.map(p => `<tr>
-    <td style="font-weight:600">${p.name}</td>
-    <td><span style="background:var(--indigo-lt);color:var(--indigo);padding:2px 10px;border-radius:100px;font-size:11px;font-weight:700">${p.category||"—"}</span></td>
-    <td>${p.email||"—"}</td>
-    <td>${p.phone||"—"}</td>
+    <td style="font-weight:600">${escapeHtml(p.name)}</td>
+    <td><span style="background:var(--indigo-lt);color:var(--indigo);padding:2px 10px;border-radius:100px;font-size:11px;font-weight:700">${escapeHtml(p.category||"—")}</span></td>
+    <td>${escapeHtml(p.email||"—")}</td>
+    <td>${escapeHtml(p.phone||"—")}</td>
     <td><span style="background:var(--amber-lt);color:#92400e;padding:2px 8px;border-radius:100px;font-size:12px;font-weight:700">${p.bill_count}</span></td>
     <td style="font-weight:600;color:var(--teal)">${fmt(p.total_paid)}</td>
     <td>
@@ -1795,7 +1859,7 @@ async function loadReminders() {
     overdueEl.innerHTML = rem.overdue.map(b => `
       <div class="reminder-card overdue" onclick="openBillStatusModal(${b.id},'${b.status}')">
         <div class="reminder-info">
-          <div class="reminder-inv">${b.bill_number} — ${b.payee_name}</div>
+          <div class="reminder-inv">${escapeHtml(b.bill_number)} — ${escapeHtml(b.payee_name)}</div>
           <div class="reminder-client">${catChip(b.bill_category || "Other")}</div>
         </div>
         <div class="reminder-right">
@@ -1811,8 +1875,8 @@ async function loadReminders() {
     upcomingEl.innerHTML = rem.upcoming.map(b => `
       <div class="reminder-card upcoming" onclick="openBillStatusModal(${b.id},'${b.status}')">
         <div class="reminder-info">
-          <div class="reminder-inv">${b.bill_number} — ${b.payee_name}</div>
-          <div class="reminder-client">${catChip(b.bill_category || "Other")} · Due ${b.due_date}</div>
+          <div class="reminder-inv">${escapeHtml(b.bill_number)} — ${escapeHtml(b.payee_name)}</div>
+          <div class="reminder-client">${catChip(b.bill_category || "Other")} · Due ${escapeHtml(b.due_date)}</div>
         </div>
         <div class="reminder-right">
           <div class="reminder-amount">${fmt(b.total_amount)}</div>
