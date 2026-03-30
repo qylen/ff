@@ -6,14 +6,17 @@ Open: http://localhost:5000
 """
 
 from flask import Flask, jsonify, request, render_template, make_response
-import sqlite3, json, csv, io, re
+import sqlite3, json, csv, io, re, os, html, secrets, base64
 from datetime import datetime, date, timedelta
 from pathlib import Path
+from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
+from functools import wraps
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
+app.config["SECRET_KEY"] = os.getenv("FF_SECRET_KEY", secrets.token_hex(16))
 
 DB_PATH       = Path(__file__).parent / "familyfinance.db"
-SETTINGS_PATH = Path(__file__).parent / "familyfinance_settings.json"
 
 DEFAULT_SETTINGS = {
     "family_name":         "Our Family",
@@ -130,7 +133,37 @@ def init_db():
             member       TEXT,
             created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE TABLE IF NOT EXISTS settings (
+            key          TEXT PRIMARY KEY,
+            value        TEXT NOT NULL,
+            updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS users (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            username     TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            role         TEXT NOT NULL DEFAULT 'Admin',
+            created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_bills_status_due ON bills(status, due_date);
+        CREATE INDEX IF NOT EXISTS idx_bills_payee ON bills(payee_id);
+        CREATE INDEX IF NOT EXISTS idx_bills_created ON bills(created_at);
+        CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(expense_date);
+        CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses(category);
+        CREATE INDEX IF NOT EXISTS idx_income_date ON income(income_date);
+        CREATE INDEX IF NOT EXISTS idx_income_category ON income(category);
         """)
+        admin_user = os.getenv("FF_ADMIN_USER", "admin")
+        admin_pass = os.getenv("FF_ADMIN_PASS", "admin123")
+        exists = conn.execute("SELECT 1 FROM users WHERE username=?", (admin_user,)).fetchone()
+        if not exists:
+            conn.execute(
+                "INSERT INTO users (username, password_hash, role) VALUES (?, ?, 'Admin')",
+                (admin_user, generate_password_hash(admin_pass))
+            )
 
 def rows_to_list(rows):
     return [dict(r) for r in rows]
@@ -144,17 +177,94 @@ def row_to_dict(row):
 
 def load_settings():
     s = DEFAULT_SETTINGS.copy()
-    if SETTINGS_PATH.exists():
-        try:
-            with open(SETTINGS_PATH) as f:
-                s.update(json.load(f))
-        except Exception:
-            pass
+    with get_db() as conn:
+        rows = conn.execute("SELECT key, value FROM settings").fetchall()
+    for r in rows:
+        key = r["key"]
+        if key in DEFAULT_SETTINGS:
+            try:
+                s[key] = json.loads(r["value"])
+            except Exception:
+                s[key] = r["value"]
     return s
 
-def save_settings_to_file(data):
-    with open(SETTINGS_PATH, "w") as f:
-        json.dump(data, f, indent=2)
+def save_settings_to_db(data):
+    with get_db() as conn:
+        for k, v in data.items():
+            conn.execute(
+                "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP",
+                (k, json.dumps(v))
+            )
+
+def as_decimal(val, default="0"):
+    try:
+        return Decimal(str(val if val is not None else default))
+    except (InvalidOperation, ValueError, TypeError):
+        return Decimal(default)
+
+def q2(val):
+    return val.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+def require_api_auth(fn):
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        if not request.path.startswith("/api/"):
+            return fn(*args, **kwargs)
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Basic "):
+            resp = jsonify({"error": "Authentication required"})
+            resp.status_code = 401
+            resp.headers["WWW-Authenticate"] = 'Basic realm="FamilyFinance"'
+            return resp
+        try:
+            raw = base64.b64decode(auth_header.split(" ", 1)[1]).decode("utf-8")
+            username, password = raw.split(":", 1)
+        except Exception:
+            return jsonify({"error": "Invalid auth header"}), 401
+        with get_db() as conn:
+            user = conn.execute(
+                "SELECT username, password_hash FROM users WHERE username=?",
+                (username,)
+            ).fetchone()
+        if not user or not check_password_hash(user["password_hash"], password):
+            return jsonify({"error": "Invalid credentials"}), 401
+        if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+            csrf_cookie = request.cookies.get("csrf_token", "")
+            csrf_header = request.headers.get("X-CSRF-Token", "")
+            if not csrf_cookie or csrf_cookie != csrf_header:
+                return jsonify({"error": "CSRF validation failed"}), 403
+        return fn(*args, **kwargs)
+    return wrapped
+
+@app.before_request
+def api_security_guard():
+    if not request.path.startswith("/api/"):
+        return None
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Basic "):
+        resp = jsonify({"error": "Authentication required"})
+        resp.status_code = 401
+        resp.headers["WWW-Authenticate"] = 'Basic realm="FamilyFinance"'
+        return resp
+    try:
+        raw = base64.b64decode(auth_header.split(" ", 1)[1]).decode("utf-8")
+        username, password = raw.split(":", 1)
+    except Exception:
+        return jsonify({"error": "Invalid auth header"}), 401
+    with get_db() as conn:
+        user = conn.execute(
+            "SELECT username, password_hash FROM users WHERE username=?",
+            (username,)
+        ).fetchone()
+    if not user or not check_password_hash(user["password_hash"], password):
+        return jsonify({"error": "Invalid credentials"}), 401
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+        csrf_cookie = request.cookies.get("csrf_token", "")
+        csrf_header = request.headers.get("X-CSRF-Token", "")
+        if not csrf_cookie or csrf_cookie != csrf_header:
+            return jsonify({"error": "CSRF validation failed"}), 403
+    return None
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HELPERS
@@ -170,13 +280,14 @@ def next_bill_number(conn, prefix="BILL"):
     return f"{prefix}-{num:04d}"
 
 def calc_bill_totals(items, discount_pct, tax_rate):
-    subtotal = sum(float(i.get("quantity", 1)) * float(i.get("unit_price", 0)) for i in items)
-    disc_pct = float(discount_pct or 0)
-    disc_amt = subtotal * disc_pct / 100
+    subtotal = sum(as_decimal(i.get("quantity", 1)) * as_decimal(i.get("unit_price", 0)) for i in items)
+    disc_pct = as_decimal(discount_pct or 0)
+    disc_amt = subtotal * disc_pct / Decimal("100")
     taxable  = subtotal - disc_amt
-    tax_amt  = taxable * float(tax_rate or 0) / 100
+    tax_pct  = as_decimal(tax_rate or 0)
+    tax_amt  = taxable * tax_pct / Decimal("100")
     total    = taxable + tax_amt
-    return subtotal, disc_pct, disc_amt, float(tax_rate or 0), tax_amt, total
+    return q2(subtotal), q2(disc_pct), q2(disc_amt), q2(tax_pct), q2(tax_amt), q2(total)
 
 def csv_response(filename, rows, headers):
     """Return a UTF-8 CSV response with BOM for Excel compatibility."""
@@ -201,7 +312,10 @@ def csv_response(filename, rows, headers):
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    resp = make_response(render_template("index.html"))
+    if not request.cookies.get("csrf_token"):
+        resp.set_cookie("csrf_token", secrets.token_urlsafe(24), samesite="Lax")
+    return resp
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DASHBOARD
@@ -211,20 +325,26 @@ def index():
 def api_dashboard():
     with get_db() as conn:
         today_str  = date.today().isoformat()
-        this_month = date.today().strftime("%Y-%m")
-        this_year  = date.today().strftime("%Y")
+        month_start = date.today().replace(day=1)
+        next_month = (month_start.replace(day=28) + timedelta(days=4)).replace(day=1)
+        month_end = next_month - timedelta(days=1)
+        year_start = date(date.today().year, 1, 1)
+        year_end = date(date.today().year, 12, 31)
 
         # ── Monthly metrics ──
         monthly_income = conn.execute(
-            "SELECT COALESCE(SUM(amount),0) FROM income WHERE strftime('%Y-%m',income_date)=?", (this_month,)
+            "SELECT COALESCE(SUM(amount),0) FROM income WHERE income_date BETWEEN ? AND ?",
+            (month_start.isoformat(), month_end.isoformat())
         ).fetchone()[0]
 
         monthly_expenses = conn.execute(
-            "SELECT COALESCE(SUM(amount),0) FROM expenses WHERE strftime('%Y-%m',expense_date)=?", (this_month,)
+            "SELECT COALESCE(SUM(amount),0) FROM expenses WHERE expense_date BETWEEN ? AND ?",
+            (month_start.isoformat(), month_end.isoformat())
         ).fetchone()[0]
 
         monthly_bills_paid = conn.execute(
-            "SELECT COALESCE(SUM(total_amount),0) FROM bills WHERE status='Paid' AND strftime('%Y-%m',paid_at)=?", (this_month,)
+            "SELECT COALESCE(SUM(total_amount),0) FROM bills WHERE status='Paid' AND paid_at BETWEEN ? AND ?",
+            (month_start.isoformat(), f"{month_end.isoformat()} 23:59:59")
         ).fetchone()[0]
 
         monthly_outflow = float(monthly_expenses) + float(monthly_bills_paid)
@@ -252,13 +372,16 @@ def api_dashboard():
 
         # ── Annual totals ──
         annual_income   = conn.execute(
-            "SELECT COALESCE(SUM(amount),0) FROM income WHERE strftime('%Y',income_date)=?", (this_year,)
+            "SELECT COALESCE(SUM(amount),0) FROM income WHERE income_date BETWEEN ? AND ?",
+            (year_start.isoformat(), year_end.isoformat())
         ).fetchone()[0]
         annual_expenses = conn.execute(
-            "SELECT COALESCE(SUM(amount),0) FROM expenses WHERE strftime('%Y',expense_date)=?", (this_year,)
+            "SELECT COALESCE(SUM(amount),0) FROM expenses WHERE expense_date BETWEEN ? AND ?",
+            (year_start.isoformat(), year_end.isoformat())
         ).fetchone()[0]
         annual_bills = conn.execute(
-            "SELECT COALESCE(SUM(total_amount),0) FROM bills WHERE status='Paid' AND strftime('%Y',paid_at)=?", (this_year,)
+            "SELECT COALESCE(SUM(total_amount),0) FROM bills WHERE status='Paid' AND paid_at BETWEEN ? AND ?",
+            (year_start.isoformat(), f"{year_end.isoformat()} 23:59:59")
         ).fetchone()[0]
 
         # ── Last 6 months trend ──
@@ -329,10 +452,10 @@ def api_settings():
         s["income_categories"]  = INCOME_CATEGORIES
         s["bill_categories"]    = BILL_CATEGORIES
         return jsonify(s)
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     current = load_settings()
     current.update({k: v for k, v in data.items() if k in DEFAULT_SETTINGS})
-    save_settings_to_file(current)
+    save_settings_to_db(current)
     return jsonify({"success": True})
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -344,24 +467,25 @@ def api_payees():
     with get_db() as conn:
         if request.method == "GET":
             q = request.args.get("q", "")
+            where = ""
+            params = []
             if q:
                 lq = f"%{q}%"
-                rows = conn.execute(
-                    "SELECT * FROM payees WHERE name LIKE ? OR email LIKE ? OR category LIKE ? ORDER BY name",
-                    (lq, lq, lq)
-                ).fetchall()
-            else:
-                rows = conn.execute("SELECT * FROM payees ORDER BY name").fetchall()
-            result = rows_to_list(rows)
-            for c in result:
-                c["bill_count"] = conn.execute(
-                    "SELECT COUNT(*) FROM bills WHERE payee_id=?", (c["id"],)
-                ).fetchone()[0]
-                c["total_paid"] = conn.execute(
-                    "SELECT COALESCE(SUM(total_amount),0) FROM bills WHERE payee_id=? AND status='Paid'", (c["id"],)
-                ).fetchone()[0]
-            return jsonify(result)
-        d = request.json or {}
+                where = "WHERE p.name LIKE ? OR p.email LIKE ? OR p.category LIKE ?"
+                params = [lq, lq, lq]
+            rows = conn.execute(
+                f"""SELECT p.*,
+                           COUNT(b.id) AS bill_count,
+                           COALESCE(SUM(CASE WHEN b.status='Paid' THEN b.total_amount ELSE 0 END), 0) AS total_paid
+                    FROM payees p
+                    LEFT JOIN bills b ON b.payee_id = p.id
+                    {where}
+                    GROUP BY p.id
+                    ORDER BY p.name""",
+                params
+            ).fetchall()
+            return jsonify(rows_to_list(rows))
+        d = request.get_json(silent=True) or {}
         if not d.get("name"):
             return jsonify({"error": "Name is required"}), 400
         conn.execute(
@@ -385,7 +509,9 @@ def api_payee(pid):
         if request.method == "DELETE":
             conn.execute("DELETE FROM payees WHERE id=?", (pid,))
             return jsonify({"success": True})
-        d = request.json or {}
+        d = request.get_json(silent=True) or {}
+        if not d.get("name"):
+            return jsonify({"error": "Name is required"}), 400
         conn.execute(
             "UPDATE payees SET name=?,email=?,phone=?,address=?,category=?,notes=? WHERE id=?",
             (d["name"], d.get("email",""), d.get("phone",""), d.get("address",""),
@@ -417,7 +543,11 @@ def api_bills():
             sql += " ORDER BY created_at DESC"
             return jsonify(rows_to_list(conn.execute(sql, params).fetchall()))
 
-        d     = request.json or {}
+        d     = request.get_json(silent=True) or {}
+        required = ["payee_name", "bill_date", "due_date"]
+        missing = [k for k in required if not d.get(k)]
+        if missing:
+            return jsonify({"error": f"Missing fields: {', '.join(missing)}"}), 400
         s     = load_settings()
         items = d.pop("items", [])
         subtotal, disc_pct, disc_amt, tax_rate, tax_amt, total = calc_bill_totals(
@@ -430,13 +560,13 @@ def api_bills():
                tax_amount,total_amount,status,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (bill_num, d.get("payee_id"), d["payee_name"], d.get("payee_email",""),
              d.get("payee_address",""), d.get("bill_category","Other"),
-             d["bill_date"], d["due_date"], subtotal, disc_pct, disc_amt,
-             tax_rate, tax_amt, total, d.get("status","Pending"), d.get("notes",""))
+             d["bill_date"], d["due_date"], float(subtotal), float(disc_pct), float(disc_amt),
+             float(tax_rate), float(tax_amt), float(total), d.get("status","Pending"), d.get("notes",""))
         )
         bill_id = cur.lastrowid
         for item in items:
-            qty   = float(item.get("quantity", 1))
-            price = float(item.get("unit_price", 0))
+            qty   = float(as_decimal(item.get("quantity", 1)))
+            price = float(as_decimal(item.get("unit_price", 0)))
             conn.execute(
                 "INSERT INTO bill_items (bill_id,item_name,description,quantity,unit_price,total) VALUES (?,?,?,?,?,?)",
                 (bill_id, item["item_name"], item.get("description",""), qty, price, qty * price)
@@ -459,11 +589,15 @@ def api_bill(bid):
             conn.execute("DELETE FROM bills WHERE id=?", (bid,))
             return jsonify({"success": True})
 
-        d = request.json or {}
+        d = request.get_json(silent=True) or {}
         if "action" in d and d["action"] == "status":
             paid_at = datetime.now().isoformat() if d["status"] == "Paid" else None
             conn.execute("UPDATE bills SET status=?,paid_at=? WHERE id=?", (d["status"], paid_at, bid))
             return jsonify({"success": True})
+        required = ["payee_name", "bill_date", "due_date"]
+        missing = [k for k in required if not d.get(k)]
+        if missing:
+            return jsonify({"error": f"Missing fields: {', '.join(missing)}"}), 400
 
         items = d.pop("items", [])
         subtotal, disc_pct, disc_amt, tax_rate, tax_amt, total = calc_bill_totals(
@@ -475,7 +609,7 @@ def api_bill(bid):
                tax_rate=?,tax_amount=?,total_amount=?,status=?,notes=? WHERE id=?""",
             (d.get("payee_id"), d["payee_name"], d.get("payee_email",""), d.get("payee_address",""),
              d.get("bill_category","Other"), d["bill_date"], d["due_date"],
-             subtotal, disc_pct, disc_amt, tax_rate, tax_amt, total,
+             float(subtotal), float(disc_pct), float(disc_amt), float(tax_rate), float(tax_amt), float(total),
              d.get("status","Pending"), d.get("notes",""), bid)
         )
         conn.execute("DELETE FROM bill_items WHERE bill_id=?", (bid,))
@@ -509,9 +643,11 @@ def generate_print_bill(b, items, s):
     sc = status_colors.get(b.get("status","Pending"), "#f59e0b")
     rows_html = ""
     for item in items:
-        desc = f"<br><small style='color:#64748b'>{item.get('description','')}</small>" if item.get('description') else ""
+        item_name = html.escape(str(item.get("item_name", "")))
+        desc_val = html.escape(str(item.get("description", "")))
+        desc = f"<br><small style='color:#64748b'>{desc_val}</small>" if desc_val else ""
         rows_html += f"""<tr>
-            <td>{item['item_name']}{desc}</td>
+            <td>{item_name}{desc}</td>
             <td style="text-align:center">{item['quantity']:g}</td>
             <td style="text-align:right">{sym}{float(item['unit_price']):,.2f}</td>
             <td style="text-align:right;font-weight:600">{sym}{float(item['total']):,.2f}</td>
@@ -519,13 +655,25 @@ def generate_print_bill(b, items, s):
     discount_row = ""
     if float(b.get("discount_amount", 0)) > 0:
         discount_row = f"<tr><td>Discount ({b['discount_pct']}%)</td><td style='text-align:right;color:#f43f5e'>-{sym}{float(b['discount_amount']):,.2f}</td></tr>"
-    notes = b.get("notes","") or s.get("family_notes","")
+    notes = html.escape(str(b.get("notes","") or s.get("family_notes","")))
+    family_name = html.escape(str(s.get('family_name','Our Family')))
+    family_address = html.escape(str(s.get('family_address',''))).replace("\n", "<br>")
+    primary_email = html.escape(str(s.get('primary_email','')))
+    primary_phone = html.escape(str(s.get('primary_phone','')))
+    bill_number = html.escape(str(b.get('bill_number', '')))
+    status = html.escape(str(b.get('status', 'Pending')))
+    bill_date = html.escape(str(b.get('bill_date', '')))
+    due_date = html.escape(str(b.get('due_date', '')))
+    bill_category = html.escape(str(b.get('bill_category','Other')))
+    payee_name = html.escape(str(b.get('payee_name', '')))
+    payee_email = html.escape(str(b.get('payee_email','')))
+    payee_address = html.escape(str(b.get('payee_address',''))).replace("\n", "<br>")
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Bill {b['bill_number']}</title>
+<title>Bill {bill_number}</title>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 *{{margin:0;padding:0;box-sizing:border-box}}
@@ -564,21 +712,21 @@ tbody td{{padding:13px 16px;border-bottom:1px solid #f1f5f9;vertical-align:top}}
 <body>
 <div class="header">
   <div>
-    <div class="fam-name">🏠 {s.get('family_name','Our Family')}</div>
+    <div class="fam-name">🏠 {family_name}</div>
     <div class="fam-details">
-      {s.get('family_address','').replace(chr(10),'<br>')}
-      {'<br>' + s.get('primary_email','') if s.get('primary_email') else ''}
-      {'<br>' + s.get('primary_phone','') if s.get('primary_phone') else ''}
+      {family_address}
+      {'<br>' + primary_email if primary_email else ''}
+      {'<br>' + primary_phone if primary_phone else ''}
     </div>
   </div>
   <div>
     <div class="bill-label">Bill / Payment</div>
-    <div class="bill-number">#{b['bill_number']}</div>
-    <div style="text-align:right"><span class="status-badge">{b.get('status','Pending')}</span></div>
+    <div class="bill-number">#{bill_number}</div>
+    <div style="text-align:right"><span class="status-badge">{status}</span></div>
     <div class="dates">
-      Bill Date: <span>{b['bill_date']}</span><br>
-      Due Date: <span>{b['due_date']}</span><br>
-      Category: <span>{b.get('bill_category','Other')}</span>
+      Bill Date: <span>{bill_date}</span><br>
+      Due Date: <span>{due_date}</span><br>
+      Category: <span>{bill_category}</span>
     </div>
   </div>
 </div>
@@ -586,14 +734,14 @@ tbody td{{padding:13px 16px;border-bottom:1px solid #f1f5f9;vertical-align:top}}
   <div>
     <div class="party-label">Billed By / Payee</div>
     <div class="party-value">
-      <strong>{b['payee_name']}</strong><br>
-      {b.get('payee_email','')}<br>
-      {b.get('payee_address','').replace(chr(10),'<br>')}
+      <strong>{payee_name}</strong><br>
+      {payee_email}<br>
+      {payee_address}
     </div>
   </div>
   <div>
     <div class="party-label">Category</div>
-    <div class="party-value">{b.get('bill_category','Other')}</div>
+    <div class="party-value">{bill_category}</div>
   </div>
 </div>
 <div class="divider"></div>
@@ -642,6 +790,8 @@ def api_expenses():
         if request.method == "GET":
             q   = request.args.get("q", "")
             cat = request.args.get("category", "")
+            limit = min(int(request.args.get("limit", 25)), 200)
+            offset = max(int(request.args.get("offset", 0)), 0)
             sql = "SELECT * FROM expenses WHERE 1=1"
             params = []
             if q:
@@ -650,28 +800,45 @@ def api_expenses():
             if cat:
                 sql += " AND category=?"
                 params.append(cat)
-            sql += " ORDER BY expense_date DESC, created_at DESC"
-            return jsonify(rows_to_list(conn.execute(sql, params).fetchall()))
+            total = conn.execute(f"SELECT COUNT(*) FROM ({sql})", params).fetchone()[0]
+            sql += " ORDER BY expense_date DESC, created_at DESC LIMIT ? OFFSET ?"
+            rows = conn.execute(sql, params + [limit, offset]).fetchall()
+            return jsonify({"items": rows_to_list(rows), "total": total, "limit": limit, "offset": offset})
 
-        d = request.json or {}
+        d = request.get_json(silent=True) or {}
+        if not d.get("title") or not d.get("expense_date"):
+            return jsonify({"error": "Title and expense_date are required"}), 400
+        amount = as_decimal(d.get("amount"))
+        if amount <= 0:
+            return jsonify({"error": "Amount must be greater than 0"}), 400
         conn.execute(
             "INSERT INTO expenses (title,category,amount,expense_date,store,receipt_ref,notes,member) VALUES (?,?,?,?,?,?,?,?)",
-            (d["title"], d.get("category","Other"), float(d["amount"]),
+            (d["title"], d.get("category","Other"), float(q2(amount)),
              d["expense_date"], d.get("store",""), d.get("receipt_ref",""),
              d.get("notes",""), d.get("member",""))
         )
         return jsonify({"success": True})
 
-@app.route("/api/expenses/<int:eid>", methods=["PUT", "DELETE"])
+@app.route("/api/expenses/<int:eid>", methods=["GET", "PUT", "DELETE"])
 def api_expense(eid):
     with get_db() as conn:
+        if request.method == "GET":
+            row = conn.execute("SELECT * FROM expenses WHERE id=?", (eid,)).fetchone()
+            if not row:
+                return jsonify({"error": "Not found"}), 404
+            return jsonify(row_to_dict(row))
         if request.method == "DELETE":
             conn.execute("DELETE FROM expenses WHERE id=?", (eid,))
             return jsonify({"success": True})
-        d = request.json or {}
+        d = request.get_json(silent=True) or {}
+        if not d.get("title") or not d.get("expense_date"):
+            return jsonify({"error": "Title and expense_date are required"}), 400
+        amount = as_decimal(d.get("amount"))
+        if amount <= 0:
+            return jsonify({"error": "Amount must be greater than 0"}), 400
         conn.execute(
             "UPDATE expenses SET title=?,category=?,amount=?,expense_date=?,store=?,receipt_ref=?,notes=?,member=? WHERE id=?",
-            (d["title"], d.get("category","Other"), float(d["amount"]),
+            (d["title"], d.get("category","Other"), float(q2(amount)),
              d["expense_date"], d.get("store",""), d.get("receipt_ref",""),
              d.get("notes",""), d.get("member",""), eid)
         )
@@ -701,6 +868,8 @@ def api_income():
         if request.method == "GET":
             q   = request.args.get("q", "")
             cat = request.args.get("category", "")
+            limit = min(int(request.args.get("limit", 25)), 200)
+            offset = max(int(request.args.get("offset", 0)), 0)
             sql = "SELECT * FROM income WHERE 1=1"
             params = []
             if q:
@@ -709,27 +878,44 @@ def api_income():
             if cat:
                 sql += " AND category=?"
                 params.append(cat)
-            sql += " ORDER BY income_date DESC, created_at DESC"
-            return jsonify(rows_to_list(conn.execute(sql, params).fetchall()))
+            total = conn.execute(f"SELECT COUNT(*) FROM ({sql})", params).fetchone()[0]
+            sql += " ORDER BY income_date DESC, created_at DESC LIMIT ? OFFSET ?"
+            rows = conn.execute(sql, params + [limit, offset]).fetchall()
+            return jsonify({"items": rows_to_list(rows), "total": total, "limit": limit, "offset": offset})
 
-        d = request.json or {}
+        d = request.get_json(silent=True) or {}
+        if not d.get("title") or not d.get("income_date"):
+            return jsonify({"error": "Title and income_date are required"}), 400
+        amount = as_decimal(d.get("amount"))
+        if amount <= 0:
+            return jsonify({"error": "Amount must be greater than 0"}), 400
         conn.execute(
             "INSERT INTO income (title,category,amount,income_date,source,notes,member) VALUES (?,?,?,?,?,?,?)",
-            (d["title"], d.get("category","Other"), float(d["amount"]),
+            (d["title"], d.get("category","Other"), float(q2(amount)),
              d["income_date"], d.get("source",""), d.get("notes",""), d.get("member",""))
         )
         return jsonify({"success": True})
 
-@app.route("/api/income/<int:iid>", methods=["PUT", "DELETE"])
+@app.route("/api/income/<int:iid>", methods=["GET", "PUT", "DELETE"])
 def api_income_item(iid):
     with get_db() as conn:
+        if request.method == "GET":
+            row = conn.execute("SELECT * FROM income WHERE id=?", (iid,)).fetchone()
+            if not row:
+                return jsonify({"error": "Not found"}), 404
+            return jsonify(row_to_dict(row))
         if request.method == "DELETE":
             conn.execute("DELETE FROM income WHERE id=?", (iid,))
             return jsonify({"success": True})
-        d = request.json or {}
+        d = request.get_json(silent=True) or {}
+        if not d.get("title") or not d.get("income_date"):
+            return jsonify({"error": "Title and income_date are required"}), 400
+        amount = as_decimal(d.get("amount"))
+        if amount <= 0:
+            return jsonify({"error": "Amount must be greater than 0"}), 400
         conn.execute(
             "UPDATE income SET title=?,category=?,amount=?,income_date=?,source=?,notes=?,member=? WHERE id=?",
-            (d["title"], d.get("category","Other"), float(d["amount"]),
+            (d["title"], d.get("category","Other"), float(q2(amount)),
              d["income_date"], d.get("source",""), d.get("notes",""), d.get("member",""), iid)
         )
         return jsonify({"success": True})
@@ -882,9 +1068,12 @@ def api_reminders():
 
 if __name__ == "__main__":
     init_db()
+    host = os.getenv("FF_HOST", "127.0.0.1")
+    port = int(os.getenv("FF_PORT", "5000"))
+    debug = os.getenv("FF_DEBUG", "0") == "1"
     print("\n" + "="*56)
     print("  🏠  FamilyFinance — Personal Budget Tracker")
     print("  📂  Database: familyfinance.db")
-    print("  🌐  Open: http://localhost:5000")
+    print(f"  🌐  Open: http://{host}:{port}")
     print("="*56 + "\n")
-    app.run(debug=True, port=5000, host="0.0.0.0")
+    app.run(debug=debug, port=port, host=host)
